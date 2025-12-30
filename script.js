@@ -1,0 +1,903 @@
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js";
+
+// --- 配置与全局变量 ---
+let scene, camera, renderer, composer, controls;
+let clock = new THREE.Clock();
+const rings = [];
+
+// 罗盘主容器，用于统一管理罗盘元素
+let luopanContainer;
+
+// 存储星星系统引用和闪烁数据
+let starSystem;
+let starOpacities = [];
+let starFrequencies = [];
+let starPhases = [];
+let starSizes = [];
+let starSizeScales = [];
+
+// 相机动画控制变量
+let isCameraAnimating = false;
+let cameraInitialPosition = new THREE.Vector3(0, 87.66, 1.95); // 相机初始位置
+let cameraTargetPosition = new THREE.Vector3(0, 45, 1); // 相机目标
+位置
+let cameraAnimationProgress = 0;
+
+// 材质颜色配置
+const COLORS = {
+  text: "#FFD700", // 纯金文字
+  bg: "#080808", // 极深灰背景，非纯黑以保留质感
+  line: "#8B6508", // 暗金线条
+  emissive: 0xffaa00, // 自发光颜色
+};
+
+// --- 数据生成 ---
+// 生成六十甲子
+const getJiaZi = () => {
+  const sky = [
+    "甲",
+    "乙",
+    "丙",
+    "丁",
+    "戊",
+    "己",
+    "庚",
+    "辛",
+    "壬",
+    "癸",
+  ];
+  const earth = [
+    "子",
+    "丑",
+    "寅",
+    "卯",
+    "辰",
+    "巳",
+    "午",
+    "未",
+    "申",
+    "酉",
+    "戌",
+    "亥",
+  ];
+  let arr = [];
+  for (let i = 0; i < 60; i++) {
+    arr.push(sky[i % 10] + earth[i % 12]);
+  }
+  return arr;
+};
+
+// 核心罗盘数据结构
+const LAYERS = [
+  // type: 'text' | 'tick' | 'empty'
+  // r: 内半径, w: 宽度
+  {
+    name: "先天八卦",
+    r: 3.5,
+    w: 1.8,
+    data: ["离", "坤", "兑", "乾", "坎", "艮", "震", "巽"],
+    speed: 0.002,
+  },
+  {
+    name: "先天八卦符号",
+    r: 4.8,
+    w: 2.2,
+    data: ["☲", "☷", "☱", "☰", "☵", "☶", "☳", "☴"],
+    speed: 0.001,
+  },
+  {
+    name: "洛书数",
+    r: 5.3,
+    w: 1.2,
+    data: ["九", "二", "七", "六", "一", "八", "三", "四"],
+    speed: -0.005,
+  },
+  {
+    name: "二十四山",
+    r: 6.5,
+    w: 2.5,
+    data: [
+      // 罗盘核心层
+      "午",
+      "丁",
+      "未",
+      "坤",
+      "申",
+      "庚",
+      "酉",
+      "辛",
+      "戌",
+      "乾",
+      "亥",
+      "壬",
+      "子",
+      "癸",
+      "丑",
+      "艮",
+      "寅",
+      "甲",
+      "卯",
+      "乙",
+      "辰",
+      "巽",
+      "巳",
+      "丙",
+    ],
+    speed: 0.001,
+  },
+  {
+    name: "二十四节气",
+    r: 9.0,
+    w: 2.0,
+    data: [
+      "夏至",
+      "小暑",
+      "大暑",
+      "立秋",
+      "处暑",
+      "白露",
+      "秋分",
+      "寒露",
+      "霜降",
+      "立冬",
+      "小雪",
+      "大雪",
+      "冬至",
+      "小寒",
+      "大寒",
+      "立春",
+      "雨水",
+      "惊蛰",
+      "春分",
+      "清明",
+      "谷雨",
+      "立夏",
+      "小满",
+      "芒种",
+    ],
+    speed: -0.006,
+  },
+  { name: "六十甲子", r: 11.0, w: 2.5, data: getJiaZi(), speed: 0.007 },
+  {
+    name: "二十八宿",
+    r: 13.7,
+    w: 2.0,
+    data: [
+      "角",
+      "亢",
+      "氐",
+      "房",
+      "心",
+      "尾",
+      "箕",
+      "斗",
+      "牛",
+      "女",
+      "虚",
+      "危",
+      "室",
+      "壁",
+      "奎",
+      "娄",
+      "胃",
+      "昴",
+      "毕",
+      "觜",
+      "参",
+      "井",
+      "鬼",
+      "柳",
+      "星",
+      "张",
+      "翼",
+      "轸",
+    ],
+    speed: -0.006,
+  },
+  {
+    name: "周天度数",
+    r: 15.7,
+    w: 1.0,
+    type: "tick",
+    count: 360,
+    speed: 0.002,
+  },
+];
+
+// 文字动画逻辑
+// 文字动画函数
+function startTextAnimation() {
+  const textItems = document.querySelectorAll(".text-item");
+  const textAnimation = document.getElementById("text-animation");
+  const canvas = document.querySelector("canvas");
+  const info = document.getElementById("info");
+
+  let index = 0;
+  const totalItems = textItems.length;
+
+  // 显示下一个文字
+  function showNextText() {
+    if (index < totalItems) {
+      textItems[index].classList.add("visible");
+      index++;
+      // 控制打字机效果的速度
+      const delay = 250;
+      setTimeout(showNextText, delay);
+    } else {
+      // 所有文字显示完成后，延迟隐藏文字动画，显示罗盘
+      setTimeout(() => {
+        textAnimation.classList.add("hidden");
+
+        // 延迟显示罗盘和信息
+        setTimeout(() => {
+          info.style.opacity = 1;
+
+          // 显示罗盘
+          luopanContainer.visible = true;
+
+          // 移除文字动画容器
+          setTimeout(() => {
+            textAnimation.style.display = "none";
+
+            // 文字完全消失后，启动相机拉近动画
+            isCameraAnimating = true;
+          }, 1000);
+        }, 500);
+      }, 2000);
+    }
+  }
+
+  // 开始显示文字
+  showNextText();
+}
+
+// 获取并显示相机视角的函数
+function getCameraView() {
+  const cameraInfo = document.getElementById("camera-info");
+
+  // 获取相机位置
+  const position = camera.position;
+
+  // 获取相机朝向
+  const direction = new THREE.Vector3();
+  camera.getWorldDirection(direction);
+
+  // 获取相机旋转（欧拉角，转换为度数）
+  const rotation = camera.rotation;
+  const rotationDeg = {
+    x: THREE.MathUtils.radToDeg(rotation.x).toFixed(2),
+    y: THREE.MathUtils.radToDeg(rotation.y).toFixed(2),
+    z: THREE.MathUtils.radToDeg(rotation.z).toFixed(2),
+  };
+
+  // 格式化视角信息
+  const infoHTML = `
+          <strong>相机视角信息</strong><br>
+          <br>
+          <strong>位置 (Position):</strong><br>
+          X: ${position.x.toFixed(2)}<br>
+          Y: ${position.y.toFixed(2)}<br>
+          Z: ${position.z.toFixed(2)}<br>
+          <br>
+          <strong>朝向 (Direction):</strong><br>
+          X: ${direction.x.toFixed(3)}<br>
+          Y: ${direction.y.toFixed(3)}<br>
+          Z: ${direction.z.toFixed(3)}<br>
+          <br>
+          <strong>旋转 (Rotation, 度):</strong><br>
+          X: ${rotationDeg.x}°<br>
+          Y: ${rotationDeg.y}°<br>
+          Z: ${rotationDeg.z}°<br>
+          <br>
+          <small>点击任意位置可关闭</small>
+        `;
+
+  // 显示信息
+  cameraInfo.innerHTML = infoHTML;
+  cameraInfo.style.opacity = "1";
+
+  // 添加点击关闭事件
+  function closeInfo() {
+    cameraInfo.style.opacity = "0";
+    document.removeEventListener("click", closeInfo);
+  }
+
+  setTimeout(() => {
+    document.addEventListener("click", closeInfo);
+  }, 100);
+}
+
+function init() {
+  // 1. 场景
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x050505, 0.02); // 雾气增强深邃感
+
+  // 2. 相机 - 初始视角调整，既能看清全貌又有点透视
+  camera = new THREE.PerspectiveCamera(
+    45,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  camera.position.copy(cameraInitialPosition); // 设置相机初始位置
+  camera.lookAt(0, 0, 0);
+
+  // 3. 渲染器
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制像素比，防止卡顿
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  document.body.appendChild(renderer.domElement);
+
+  // 4. 控制器
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.maxPolarAngle = Math.PI / 2 - 0.1; // 限制不能钻到地下
+
+  // 当用户开始操作时，停止相机动画
+  controls.addEventListener("start", () => {
+    isCameraAnimating = false;
+  });
+
+  // 5. 灯光 - 解决反光看不清的核心
+  // 环境光调亮，保证暗部有细节
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+
+  // 主光源：柔和的暖光，位置偏高偏侧，减少直接刺眼的镜面反射
+  const mainLight = new THREE.DirectionalLight(0xffeebb, 1.5);
+  mainLight.position.set(20, 50, 20);
+  scene.add(mainLight);
+
+  // 补光：冷色光，增加金属层次
+  const fillLight = new THREE.DirectionalLight(0x4455ff, 0.5);
+  fillLight.position.set(-20, 20, -20);
+  scene.add(fillLight);
+
+  // 6. 先创建星星（不添加到罗盘容器）
+  createStars();
+
+  // 7. 创建罗盘主容器
+  luopanContainer = new THREE.Group();
+  luopanContainer.visible = false; // 初始隐藏罗盘
+  scene.add(luopanContainer);
+
+  // 8. 创建罗盘对象
+  createLuopan();
+  createTaichi();
+
+  // 7. 后期辉光
+  const renderScene = new RenderPass(scene, camera);
+  // 调整辉光参数：阈值高一点只让字亮，强度适中
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    1.5,
+    0.4,
+    0.85
+  );
+  bloomPass.threshold = 0.3;
+  bloomPass.strength = 0.8;
+  bloomPass.radius = 0.3;
+
+  composer = new EffectComposer(renderer);
+  composer.addPass(renderScene);
+  composer.addPass(bloomPass);
+
+  // 移除 Loading
+  const loadingEl = document.getElementById("loading");
+  loadingEl.style.opacity = 0;
+  setTimeout(() => loadingEl.remove(), 1000);
+
+  window.addEventListener("resize", onWindowResize);
+}
+
+// --- 核心算法：生成自适应纹理 ---
+function createLayerTexture(layer) {
+  const size = 2048; // 2K纹理保证清晰度
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const cx = size / 2;
+  const cy = size / 2;
+
+  // 1. 绘制背景环 (深色底，增加对比度)
+  const maxRadius = layer.r + layer.w;
+  const scale = size / 2 / maxRadius; // 像素/单位
+
+  const pixelInnerR = layer.r * scale;
+  const pixelOuterR = (layer.r + layer.w) * scale;
+  const pixelMidR = (pixelInnerR + pixelOuterR) / 2;
+
+  // 填充背景
+  ctx.beginPath();
+  ctx.arc(cx, cy, pixelOuterR, 0, Math.PI * 2);
+  ctx.arc(cx, cy, pixelInnerR, 0, Math.PI * 2, true); // 挖空内圆
+  ctx.fillStyle = COLORS.bg;
+  ctx.fill();
+
+  // 绘制边框线
+  ctx.strokeStyle = COLORS.line;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, pixelInnerR + 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, pixelOuterR - 2, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 2. 绘制内容
+  if (layer.type === "tick") {
+    // 绘制刻度
+    const count = layer.count;
+    const step = (Math.PI * 2) / count;
+    ctx.strokeStyle = COLORS.text;
+    ctx.lineWidth = 3;
+    for (let i = 0; i < count; i++) {
+      const angle = i * step;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      // 长短刻度
+      const len = i % 10 === 0 ? 30 : i % 5 === 0 ? 20 : 10;
+      ctx.moveTo(0, -pixelOuterR + 5);
+      ctx.lineTo(0, -pixelOuterR + 5 + len);
+      ctx.stroke();
+      ctx.restore();
+
+      // 每10个刻度（即每10度）绘制一个数字
+      if (i % 10 === 0) {
+        ctx.save();
+        ctx.font = `bold 30px "SongTi", "STKaiti", serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = COLORS.text;
+        ctx.shadowColor = "#000";
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 2;
+
+        // 计算数字的位置，使其在圆周上
+        const textAngle = angle + Math.PI; // 旋转180 上南下北
+        const textRadius = pixelOuterR - 40; // 调整距离，使文字不在刻度线上
+
+        // 通过旋转和平移来定位文字
+        ctx.translate(cx, cy);
+        ctx.rotate(textAngle);
+        ctx.translate(0, -textRadius); // 向圆心方向移动，使文字在刻度内侧
+        ctx.rotate(Math.PI); // 旋转180度，让文字倒过来
+        ctx.fillText(i.toString(), 0, 0);
+        ctx.restore();
+      }
+    }
+  } else if (layer.data && layer.data.length > 0) {
+    // 绘制文字
+    const items = layer.data;
+    const count = items.length;
+    const angleStep = (Math.PI * 2) / count;
+
+    // 自动计算字体大小
+    const arcLen = (2 * Math.PI * pixelMidR) / count;
+    const ringW = pixelOuterR - pixelInnerR;
+
+    // 字体大小取 宽度 和 弧长 中的较小值，并留出 Padding
+    let fontSize;
+    if (layer.name === "六十甲子") {
+      // 六十甲子两个字上下叠，需要考虑总高度
+      fontSize = Math.min((ringW * 0.6) / 2, arcLen * 0.8);
+    } else {
+      fontSize = Math.min(ringW * 0.6, arcLen * 0.8);
+    }
+
+    // 针对汉字稍微调整，防止过大
+    if (fontSize > 180) fontSize = 180;
+    if (fontSize < 10) fontSize = 10;
+
+    ctx.font = `bold ${fontSize}px "SongTi", "STKaiti", serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = COLORS.text;
+
+    // 增加一点文字阴影模拟蚀刻感
+    ctx.shadowColor = "#000";
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 2;
+
+    for (let i = 0; i < count; i++) {
+      ctx.save();
+      // 罗盘文字通常底部朝向圆心，或者顶部朝向圆心
+      // 这里我们设定：字头朝外 (便于阅读)
+      const angle = i * angleStep;
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.translate(0, -pixelMidR);
+
+      if (layer.name === "六十甲子") {
+        // 特殊处理：两个字上下叠
+        const text = items[i];
+        const char1 = text[0];
+        const char2 = text[1];
+        // 上字
+        ctx.rotate(Math.PI); // 旋转180度
+        ctx.fillText(char1, 0, -fontSize / 2);
+        ctx.rotate(-Math.PI); // 恢复
+        // 下字
+        ctx.rotate(Math.PI);
+        ctx.fillText(char2, 0, fontSize / 2);
+        ctx.rotate(-Math.PI);
+      } else {
+        ctx.rotate(Math.PI); // 旋转180度
+        ctx.fillText(items[i], 0, 0);
+        ctx.rotate(-Math.PI); // 恢复
+      }
+
+      // 绘制分隔线 (可选，仅在数据量少时绘制，太密了不好看)
+      if (count <= 24) {
+        ctx.strokeStyle = "#332200";
+        ctx.lineWidth = 2;
+        ctx.shadowColor = "transparent"; // 线条不要阴影
+        // 绘制在两个字中间
+        ctx.beginPath();
+        // 回退半个角度
+        ctx.rotate(-angleStep / 2);
+      }
+
+      ctx.restore();
+
+      // 分隔线
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle + angleStep / 2);
+      ctx.translate(0, -pixelMidR);
+      ctx.fillStyle = "#443300";
+      ctx.fillRect(-1, -ringW / 2 + 5, 2, ringW - 10);
+      ctx.restore();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return texture;
+}
+
+function createLuopan() {
+  LAYERS.forEach((layer, index) => {
+    // 1. 几何体
+    const geometry = new THREE.RingGeometry(
+      layer.r,
+      layer.r + layer.w,
+      128
+    );
+    const texture = createLayerTexture(layer);
+
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      color: 0xffffff,
+
+      // 关键设置：哑光 + 自发光
+      roughness: 0.6, // 粗糙一点，减少像镜子一样的反光
+      metalness: 0.4, // 金属感低一点，让贴图颜色显现出来
+
+      emissive: COLORS.emissive, // 自发光颜色
+      emissiveMap: texture, // 只有有字的地方发光
+      emissiveIntensity: 0.4, // 发光强度
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2;
+
+    // 错落的高度，增加立体感
+    const yPos = (LAYERS.length - index) * 0.05;
+    mesh.position.y = yPos;
+
+    // 3. 装饰边框（增加金属厚度感）
+    // 内圈金边
+    const borderGeo = new THREE.TorusGeometry(layer.r, 0.03, 16, 100);
+    const borderMat = new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      roughness: 0.2,
+      metalness: 1.0,
+    });
+    const innerBorder = new THREE.Mesh(borderGeo, borderMat);
+    innerBorder.rotation.x = -Math.PI / 2;
+    innerBorder.position.y = yPos;
+
+    // 外圈金边
+    const outerBorder = new THREE.Mesh(
+      new THREE.TorusGeometry(layer.r + layer.w, 0.03, 16, 100),
+      borderMat
+    );
+    outerBorder.rotation.x = -Math.PI / 2;
+    outerBorder.position.y = yPos;
+
+    // 编组
+    const group = new THREE.Group();
+    group.add(mesh);
+    group.add(innerBorder);
+    group.add(outerBorder);
+
+    group.userData = { speed: layer.speed };
+
+    luopanContainer.add(group);
+    rings.push(group);
+  });
+}
+
+function createTaichi() {
+  // 创建中间的太极实体
+  const shape = new THREE.Shape();
+  const r = 3.2; // 稍微小于第一层内径
+  shape.absarc(0, 0, r, -Math.PI / 2, Math.PI / 2, true);
+  shape.absarc(0, r / 2, r / 2, Math.PI / 2, -Math.PI / 2, false);
+  shape.absarc(0, -r / 2, r / 2, Math.PI / 2, -Math.PI / 2, true);
+
+  const extrudeSettings = {
+    depth: 0.4,
+    bevelEnabled: true,
+    bevelSegments: 4,
+    steps: 2,
+    bevelSize: 0.1,
+    bevelThickness: 0.1,
+  };
+
+  const yangGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  const yinGeo = yangGeo.clone();
+
+  // 阳：金色高亮
+  const yangMat = new THREE.MeshStandardMaterial({
+    color: 0xffd700,
+    metalness: 0.8,
+    roughness: 0.2,
+    emissive: 0xaa6600,
+    emissiveIntensity: 0.2,
+  });
+
+  // 阴：深邃黑
+  const yinMat = new THREE.MeshStandardMaterial({
+    color: 0x050505,
+    metalness: 0.5,
+    roughness: 0.5,
+  });
+
+  const yangMesh = new THREE.Mesh(yangGeo, yangMat);
+  const yinMesh = new THREE.Mesh(yinGeo, yinMat);
+
+  yangMesh.rotation.x = -Math.PI / 2;
+  yinMesh.rotation.x = -Math.PI / 2;
+  yinMesh.rotation.z = Math.PI;
+
+  // 鱼眼：将极点修改为圆柱体，圆形面朝上
+  const eyeHeight = 0.25;
+  const eyeRadius = 0.4; // 圆柱体半径
+  const eyeGeo = new THREE.CylinderGeometry(
+    eyeRadius,
+    eyeRadius,
+    eyeHeight,
+    16
+  );
+  const yangEye = new THREE.Mesh(eyeGeo, yinMat);
+  const yinEye = new THREE.Mesh(eyeGeo, yangMat);
+
+  // 调整鱼眼位置，不需要旋转，圆柱体默认是立起来的
+  // 调整Y轴位置，使圆柱体底部与太极表面齐平，顶部朝上
+  yangEye.position.set(0, 0.3 + eyeHeight / 2, r / 2);
+  yinEye.position.set(0, 0.3 + eyeHeight / 2, -r / 2);
+
+  const group = new THREE.Group();
+  group.add(yangMesh, yinMesh, yangEye, yinEye);
+  group.position.y = 0.5; // 最高层
+
+  luopanContainer.add(group);
+
+  // 让太极单独旋转
+  group.userData = { speed: 0.005 };
+  rings.push(group);
+}
+
+function createStars() {
+  // 创建星星纹理（带有光晕效果）
+  const createStarTexture = () => {
+    const canvas = document.createElement("canvas");
+    const size = 64;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    // 创建径向渐变，中心亮，边缘暗
+    const gradient = ctx.createRadialGradient(
+      size / 2,
+      size / 2,
+      0,
+      size / 2,
+      size / 2,
+      size / 2
+    );
+    gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+    gradient.addColorStop(0.2, "rgba(255, 255, 255, 0.8)");
+    gradient.addColorStop(0.4, "rgba(255, 255, 255, 0.4)");
+    gradient.addColorStop(0.6, "rgba(255, 255, 255, 0.2)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    return new THREE.CanvasTexture(canvas);
+  };
+
+  const geometry = new THREE.BufferGeometry();
+  const count = 50000;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 4); // 使用RGBA格式
+  const sizes = new Float32Array(count); // 星星大小
+
+  // 初始化闪烁数据数组
+  starOpacities = new Float32Array(count);
+  starFrequencies = new Float32Array(count);
+  starPhases = new Float32Array(count);
+  starSizes = new Float32Array(count);
+  starSizeScales = new Float32Array(count);
+
+  // 星星颜色数组，模拟真实星星的不同颜色
+  const starColors = [
+    [1.0, 0.9, 0.7], // 白黄星
+    [1.0, 0.8, 0.4], // 金星
+    [0.9, 0.9, 1.0], // 蓝白星
+    [0.8, 0.8, 1.0], // 蓝星
+    [1.0, 0.7, 0.7], // 红星
+    [1.0, 0.9, 0.9], // 白星
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const r = 50 + Math.random() * 100;
+    const theta = 2 * Math.PI * Math.random();
+    const phi = Math.acos(2 * Math.random() - 1);
+
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = r * Math.cos(phi);
+
+    // 随机选择星星颜色
+    const colorIndex = Math.floor(Math.random() * starColors.length);
+    const starColor = starColors[colorIndex];
+    colors[i * 4] = starColor[0];
+    colors[i * 4 + 1] = starColor[1];
+    colors[i * 4 + 2] = starColor[2];
+
+    // 随机决定是否为特殊星星（20%概率）
+    const isSpecial = Math.random() < 0.2;
+
+    // 初始化闪烁属性
+    if (isSpecial) {
+      // 特殊星星：闪烁效果更明显
+      starOpacities[i] = 0.4 + Math.random() * 0.6; // 基础不透明度：0.4-1.0
+      starFrequencies[i] = 0.8 + Math.random() * 3.2; // 闪烁频率：0.8-4.0Hz
+      starPhases[i] = Math.random() * Math.PI * 2; // 随机相位：0-2π
+      starSizes[i] = 1.0 + Math.random() * 3.0; // 基础大小：1.0-4.0
+      starSizeScales[i] = 0.8 + Math.random() * 1.2; // 大小变化范围：0.8-2.0
+    } else {
+      // 普通星星：正常闪烁效果
+      starOpacities[i] = 0.3 + Math.random() * 0.7; // 基础不透明度：0.3-1.0
+      starFrequencies[i] = 0.3 + Math.random() * 2.2; // 闪烁频率：0.3-2.5Hz
+      starPhases[i] = Math.random() * Math.PI * 2; // 随机相位：0-2π
+      starSizes[i] = 0.3 + Math.random() * 0.7; // 基础大小：0.3-1.0
+      starSizeScales[i] = 0.5 + Math.random() * 0.5; // 大小变化范围：0.5-1.0
+    }
+
+    // 初始值
+    colors[i * 4 + 3] = starOpacities[i];
+    sizes[i] = starSizes[i];
+  }
+
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(positions, 3)
+  );
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+  geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+  const material = new THREE.PointsMaterial({
+    map: createStarTexture(),
+    transparent: true,
+    opacity: 1.0,
+    sizeAttenuation: true,
+    vertexColors: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  starSystem = new THREE.Points(geometry, material);
+  scene.add(starSystem);
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// 星星闪烁动画
+function flipStars() {
+  if (starSystem) {
+    const time = clock.getElapsedTime();
+    const colors = starSystem.geometry.attributes.color.array;
+    const sizes = starSystem.geometry.attributes.size.array;
+    for (let i = 0; i < starOpacities.length; i++) {
+      // 使用正弦函数计算当前透明度
+      const alpha = starOpacities[i] * (0.5 + 0.5 * Math.sin(time * starFrequencies[i] + starPhases[i]));
+      colors[i * 4 + 3] = alpha;
+
+      // 使用正弦函数计算当前大小，与透明度相位差90度，产生更自然的闪烁效果
+      const size = starSizes[i] * (0.5 + 0.5 * Math.sin(time * starFrequencies[i] + starPhases[i] + Math.PI / 2));
+      sizes[i] = size;
+    }
+    starSystem.geometry.attributes.color.needsUpdate = true;
+    starSystem.geometry.attributes.size.needsUpdate = true;
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+
+  controls.update();
+
+  flipStars();
+
+  // 相机拉近动画
+  if (isCameraAnimating) {
+    // 使用缓动函数实现平滑过渡
+    cameraAnimationProgress += delta * 0.5; // 增加动画速度，确保能在合理时间内完成
+    cameraAnimationProgress = Math.min(cameraAnimationProgress, 1); // 限制进度在0-1之间
+    const easeProgress = 1 - Math.pow(1 - cameraAnimationProgress, 3); // 三次方缓动，先慢后快
+
+    if (cameraAnimationProgress < 1) {
+      // 相机位置从初始位置平滑过渡到目标位置
+      camera.position.lerp(
+        cameraTargetPosition,
+        easeProgress * delta * 5
+      );
+    } else {
+      // 动画完成，设置最终位置并停止动画
+      camera.position.copy(cameraTargetPosition);
+      isCameraAnimating = false;
+    }
+  }
+
+  // 相机动画完成后，启动罗盘旋转动画
+  if (!isCameraAnimating && cameraAnimationProgress >= 1) {
+    // 罗盘动态逻辑
+    rings.forEach((ring, i) => {
+      if (ring.userData.speed) {
+        ring.rotation.y -= ring.userData.speed;
+      }
+    });
+  }
+
+  composer.render();
+}
+
+// 先初始化3D场景（包含星星）
+init();
+animate();
+
+// 星星显示后，再执行文字动画
+setTimeout(() => {
+  startTextAnimation();
+}, 1000);
+
+// 添加鼠标点击事件监听
+// document.addEventListener("click", (event) => {
+//   // 确保点击的是画布区域，不是UI元素
+//   if (event.target.tagName === "CANVAS") {
+//     getCameraView();
+//   }
+// });
