@@ -23,8 +23,7 @@ let starSizeScales = [];
 // 相机动画控制变量
 let isCameraAnimating = false;
 let cameraInitialPosition = new THREE.Vector3(0, 87.66, 1.95); // 相机初始位置
-let cameraTargetPosition = new THREE.Vector3(0, 45, 1); // 相机目标
-位置
+let cameraTargetPosition = new THREE.Vector3(0, 45, 1); // 相机目标位置
 let cameraAnimationProgress = 0;
 
 // 材质颜色配置
@@ -38,18 +37,7 @@ const COLORS = {
 // --- 数据生成 ---
 // 生成六十甲子
 const getJiaZi = () => {
-  const sky = [
-    "甲",
-    "乙",
-    "丙",
-    "丁",
-    "戊",
-    "己",
-    "庚",
-    "辛",
-    "壬",
-    "癸",
-  ];
+  const sky = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"];
   const earth = [
     "子",
     "丑",
@@ -321,7 +309,7 @@ function init() {
     45,
     window.innerWidth / window.innerHeight,
     0.1,
-    1000
+    1000,
   );
   camera.position.copy(cameraInitialPosition); // 设置相机初始位置
   camera.lookAt(0, 0, 0);
@@ -379,7 +367,7 @@ function init() {
     new THREE.Vector2(window.innerWidth, window.innerHeight),
     1.5,
     0.4,
-    0.85
+    0.85,
   );
   bloomPass.threshold = 0.3;
   bloomPass.strength = 0.8;
@@ -569,11 +557,7 @@ function createLayerTexture(layer) {
 function createLuopan() {
   LAYERS.forEach((layer, index) => {
     // 1. 几何体
-    const geometry = new THREE.RingGeometry(
-      layer.r,
-      layer.r + layer.w,
-      128
-    );
+    const geometry = new THREE.RingGeometry(layer.r, layer.r + layer.w, 128);
     const texture = createLayerTexture(layer);
 
     const material = new THREE.MeshStandardMaterial({
@@ -613,7 +597,7 @@ function createLuopan() {
     // 外圈金边
     const outerBorder = new THREE.Mesh(
       new THREE.TorusGeometry(layer.r + layer.w, 0.03, 16, 100),
-      borderMat
+      borderMat,
     );
     outerBorder.rotation.x = -Math.PI / 2;
     outerBorder.position.y = yPos;
@@ -681,7 +665,7 @@ function createTaichi() {
     eyeRadius,
     eyeRadius,
     eyeHeight,
-    16
+    16,
   );
   const yangEye = new THREE.Mesh(eyeGeo, yinMat);
   const yinEye = new THREE.Mesh(eyeGeo, yangMat);
@@ -718,7 +702,7 @@ function createStars() {
       0,
       size / 2,
       size / 2,
-      size / 2
+      size / 2,
     );
     gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
     gradient.addColorStop(0.2, "rgba(255, 255, 255, 0.8)");
@@ -796,10 +780,7 @@ function createStars() {
     sizes[i] = starSizes[i];
   }
 
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(positions, 3)
-  );
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
   geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
 
@@ -831,11 +812,17 @@ function flipStars() {
     const sizes = starSystem.geometry.attributes.size.array;
     for (let i = 0; i < starOpacities.length; i++) {
       // 使用正弦函数计算当前透明度
-      const alpha = starOpacities[i] * (0.5 + 0.5 * Math.sin(time * starFrequencies[i] + starPhases[i]));
+      const alpha =
+        starOpacities[i] *
+        (0.5 + 0.5 * Math.sin(time * starFrequencies[i] + starPhases[i]));
       colors[i * 4 + 3] = alpha;
 
       // 使用正弦函数计算当前大小，与透明度相位差90度，产生更自然的闪烁效果
-      const size = starSizes[i] * (0.5 + 0.5 * Math.sin(time * starFrequencies[i] + starPhases[i] + Math.PI / 2));
+      const size =
+        starSizes[i] *
+        (0.5 +
+          0.5 *
+            Math.sin(time * starFrequencies[i] + starPhases[i] + Math.PI / 2));
       sizes[i] = size;
     }
     starSystem.geometry.attributes.color.needsUpdate = true;
@@ -861,10 +848,7 @@ function animate() {
 
     if (cameraAnimationProgress < 1) {
       // 相机位置从初始位置平滑过渡到目标位置
-      camera.position.lerp(
-        cameraTargetPosition,
-        easeProgress * delta * 5
-      );
+      camera.position.lerp(cameraTargetPosition, easeProgress * delta * 5);
     } else {
       // 动画完成，设置最终位置并停止动画
       camera.position.copy(cameraTargetPosition);
